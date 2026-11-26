@@ -224,6 +224,17 @@ body.mocking::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-ar
 .seg button.on{background:var(--card);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.12)}
 label.fld{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted)}
 label.fld input{font:inherit;font-size:16px;color:var(--ink);background:var(--paper);border:1.5px solid var(--rule);border-radius:9px;min-height:44px;padding:0 10px}
+.tcard{display:flex;flex-direction:column;gap:10px}
+.tbig{font-family:var(--num);font-size:30px;font-weight:600;line-height:1}
+.tbig small{font-size:14px;color:var(--muted);font-weight:500}
+.runbar{position:sticky;top:env(safe-area-inset-top,0px);z-index:15;display:flex;align-items:center;gap:10px;background:var(--debit);color:#fff;border-radius:12px;padding:8px 8px 8px 14px;margin-bottom:12px}
+.runbar .num{font-size:18px;font-weight:600;flex:1}
+.runbar button{background:rgba(255,255,255,.2);color:#fff;border-radius:9px;min-height:36px;padding:0 14px;font-weight:700}
+.btn.timer{background:var(--debit);color:#fff;white-space:nowrap}
+:root:not([data-theme="light"]) .btn.timer{color:#fff}
+.legend{display:flex;gap:12px;font-size:12px;color:var(--muted);flex-wrap:wrap}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:4px;vertical-align:-1px}
+.mins{display:flex;gap:6px;flex-wrap:wrap}
 </style>
 
 <style>
@@ -798,7 +809,7 @@ function jdate(s){const [y,m,d]=s.split("-").map(Number);return m+"/"+d;}
 
 /* ============ 状態と保存 ============ */
 const LSKEY="boki3-30d-v1";
-function fresh(){const t=today();return {v:1,start:t,exam:addDays(t,30),qs:{},days:{},read:{},mocks:[],log:{},cls:{c:0,w:0},q2:[],q3:[],updatedAt:0};}
+function fresh(){const t=today();return {v:1,start:t,exam:addDays(t,30),qs:{},days:{},read:{},mocks:[],log:{},cls:{c:0,w:0},q2:[],q3:[],time:{},sess:[],timer:null,goal:90,updatedAt:0};}
 function load(){try{const t=localStorage.getItem(LSKEY);if(t)return Object.assign(fresh(),JSON.parse(t));}catch(e){}return fresh();}
 let S=load();
 function save(){S.updatedAt=Date.now();try{localStorage.setItem(LSKEY,JSON.stringify(S));}catch(e){}}
@@ -813,7 +824,47 @@ function weakList(){return QS.filter(q=>S.qs[q.id]&&S.qs[q.id].w>0).sort((a,b)=>
 function pickQs(topics,n){const pool=QS.filter(q=>topics.includes(q.topic));const un=shuffle(pool.filter(q=>!S.qs[q.id]));const seen=shuffle(pool.filter(q=>S.qs[q.id])).sort((a,b)=>S.qs[a.id].b-S.qs[b.id].b);return un.concat(seen).slice(0,n);}
 function topicAcc(t){let c=0,w=0,seen=0;const qs=QS.filter(q=>q.topic===t);for(const q of qs){const r=S.qs[q.id];if(r){c+=r.c;w+=r.w;seen++;}}return {c,w,seen,total:qs.length,acc:c+w?c/(c+w):null};}
 function overallAcc(){let c=0,w=0;for(const k in S.qs){c+=S.qs[k].c;w+=S.qs[k].w;}return c+w?c/(c+w):null;}
-function streak(){let n=0,d=today();if(!S.log[d])d=addDays(d,-1);while(S.log[d]){n++;d=addDays(d,-1);}return n;}
+/* ---- 勉強時間 ---- */
+function tday(d){S.time=S.time||{};return S.time[d]||(S.time[d]={app:0,ext:0});}
+function secOf(d){const t=(S.time||{})[d];return t?(t.app||0)+(t.ext||0):0;}
+function runSec(){return S.timer?Math.max(0,Math.floor((Date.now()-S.timer.at)/1000)):0;}
+function todaySec(){return secOf(today())+runSec()+(typeof appAcc==="number"?appAcc:0);}
+function hm(sec){const m=Math.floor(sec/60);return m>=60?Math.floor(m/60)+"時間"+(m%60?m%60+"分":""):m+"分";}
+function clock(sec){const h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),x=sec%60;return h+":"+String(m).padStart(2,"0")+":"+String(x).padStart(2,"0");}
+function totalSec(){let t=0;for(const d in (S.time||{}))t+=secOf(d);return t+runSec();}
+function startTimer2(){if(S.timer)return;S.timer={at:Date.now()};save();render();}
+function stopTimer2(){if(!S.timer)return;const sec=runSec();const d=ymd(new Date(S.timer.at));S.timer=null;if(sec>=30){tday(d).ext+=sec;S.sess.unshift({d,sec,src:"タイマー"});}save();render();}
+function addManual(d,min,memo){const sec=Math.round(min*60);if(!(sec>0))return;tday(d).ext+=sec;S.sess.unshift({d,sec,src:"手入力",memo:memo||""});save();}
+function delSess(i){const e=S.sess[i];if(!e)return;const t=tday(e.d);t.ext=Math.max(0,t.ext-e.sec);S.sess.splice(i,1);save();}
+var lastAct=Date.now(),appAcc=0;
+["pointerdown","keydown","scroll","input"].forEach(ev=>document.addEventListener(ev,()=>{lastAct=Date.now();},{passive:true,capture:true}));
+function flushApp(){if(appAcc>0){tday(today()).app+=appAcc;appAcc=0;try{localStorage.setItem(LSKEY,JSON.stringify(S));}catch(e){}}}
+setInterval(()=>{
+  if(document.visibilityState==="visible"&&!S.timer&&Date.now()-lastAct<120000)appAcc+=10;
+  if(appAcc>=60)flushApp();
+  const el=document.getElementById("today-time");if(el&&!S.timer)el.textContent=hm(todaySec());
+},10000);
+setInterval(()=>{if(!S.timer)return;const t=runSec();document.querySelectorAll("[data-run]").forEach(e=>e.textContent=clock(t));const el=document.getElementById("today-time");if(el)el.textContent=hm(todaySec());},1000);
+document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="hidden")flushApp();else lastAct=Date.now();});
+function weekChart(){
+  const days=[...Array(7)].map((_,i)=>addDays(today(),i-6));const W=320,H=150,P=22,bw=28;
+  const vals=days.map(d=>{const t=(S.time||{})[d]||{app:0,ext:0};const r=d===today()?runSec():0;return {d,app:((t.app||0)+(d===today()?appAcc:0))/60,ext:((t.ext||0)+r)/60};});
+  const goal=S.goal||90;const mx=Math.max(goal*1.2,...vals.map(v=>v.app+v.ext),30);
+  const y=v=>H-P-(v/mx)*(H-P-14);const step=(W-2*P)/7;
+  let g=`<svg class="spark" style="height:160px" viewBox="0 0 ${W} ${H}" role="img" aria-label="直近7日の勉強時間">`;
+  g+=`<line x1="${P}" x2="${W-P}" y1="${y(goal)}" y2="${y(goal)}" stroke="var(--stamp)" stroke-dasharray="4 4"/><text x="${W-P}" y="${y(goal)-4}" text-anchor="end" font-size="10" fill="var(--stamp)">目標 ${goal}分</text>`;
+  vals.forEach((v,i)=>{const x=P+step*i+(step-bw)/2;const ya=y(v.app),ye=y(v.app+v.ext);
+    if(v.app>0)g+=`<rect x="${x}" y="${ya}" width="${bw}" height="${H-P-ya}" rx="3" fill="var(--accent)"/>`;
+    if(v.ext>0)g+=`<rect x="${x}" y="${ye}" width="${bw}" height="${ya-ye}" rx="3" fill="var(--debit)"/>`;
+    const tot=Math.round(v.app+v.ext);if(tot>0)g+=`<text x="${x+bw/2}" y="${ye-4}" text-anchor="middle" font-size="10" fill="var(--ink)" font-family="IBM Plex Mono,monospace">${tot}</text>`;
+    g+=`<text x="${x+bw/2}" y="${H-6}" text-anchor="middle" font-size="10" fill="${v.d===today()?"var(--ink)":"var(--muted)"}" font-weight="${v.d===today()?700:400}">${v.d===today()?"今日":jdate(v.d)}</text>`;});
+  g+=`<line x1="${P}" x2="${W-P}" y1="${H-P}" y2="${H-P}" stroke="var(--rule)"/></svg>`;return g;}
+function timeCard(){
+  const sec=todaySec(),goal=(S.goal||90)*60;const pc=Math.min(1,sec/goal);
+  return `<div class="sheet tcard"><div class="row between"><div><div class="eyebrow">今日の勉強時間</div><div class="tbig"><span id="today-time">${hm(sec)}</span><small> / 目標${hm(goal)}</small></div></div>${S.timer?`<button class="btn timer" data-act="tstop">停止 <span class="num" data-run>${clock(runSec())}</span></button>`:`<button class="btn timer" data-act="tstart">▶ タイマー</button>`}</div>
+  <div class="meter"><i style="width:${pc*100}%"></i></div>
+  <p class="small muted">アプリを使っている時間は自動で記録されます。テキストや動画で勉強するときはタイマーを使ってください。</p></div>`;}
+function streak(){const has=d=>S.log[d]||secOf(d)>=60||(d===today()&&!!S.timer);let n=0,d=today();if(!has(d))d=addDays(d,-1);while(has(d)){n++;d=addDays(d,-1);}return n;}
 
 /* ============ 仕訳フォーム ============ */
 const FORMS={},VALS={};
@@ -1063,7 +1114,7 @@ function render(){
   $("#tabs").hidden=VIEW.name==="session"||VIEW.name==="mock-run";
   const v=$("#view");
   const fn={home:vHome,learn:vLearn,lesson:vLesson,drill:vDrill,session:vSession,mock:vMock,"mock-run":vMockRun,result:vResult,stats:vStats,settings:vSettings}[VIEW.name];
-  v.innerHTML=fn();
+  v.innerHTML=(S.timer&&VIEW.name!=="home"&&VIEW.name!=="mock-run"?`<div class="runbar"><span>⏱ 勉強中</span><span class="num" data-run>${clock(runSec())}</span><button data-act="tstop">停止</button></div>`:"")+fn();
   if(VIEW.name==="mock-run")tick();
 }
 function go(name,params={}){VIEW=Object.assign({name},params);render();window.scrollTo(0,0);}
@@ -1078,6 +1129,7 @@ function vHome(){
   <div class="row">${paceChip()}${doneToday()?`<span class="chip">今日 ${doneToday()}日分クリア</span>`:""}</div>
   <div class="meter" title="全体の進み具合"><i style="width:${Math.round(tot/of*100)}%"></i></div>
   <div class="stats3"><div class="stat"><b>${acc==null?"—":Math.round(acc*100)+"%"}</b><span>仕訳の正答率</span></div><div class="stat"><b>${dueList().length}</b><span>復習待ち</span></div><div class="stat"><b>${last?last.total:"—"}</b><span>直近の模試</span></div></div>
+  ${timeCard()}
   <div class="sheet"><div class="row between"><div><div class="eyebrow">${sd===d?"次にやるメニュー":"Day "+sd+" のメニュー"}</div><h2>Day ${sd}　${p.t}</h2></div>${sd!==d?`<button class="ghost small" data-act="selday" data-d="${d}">次のメニューへ</button>`:""}</div>
   ${sd===d&&d>1&&S.doneAt&&S.doneAt[d-1]===today()&&dayProgress(d).n===0?`<p class="small" style="margin-top:6px;padding:8px 10px;border-radius:9px;background:var(--accent-soft)">Day ${d-1} を完了しました。余裕があればこのまま Day ${d} へ進めます。今日はここまででも大丈夫です。</p>`:""}<div style="margin-top:6px">${p.k.map((k,i)=>{const ti=taskInfo(k);const ok=!!done[i];return `<div class="task${ok?" done":""}"><div class="box">${ok?"✓":""}</div><div class="tt"><b>${ti.t}</b><span>${ti.s}</span></div><button class="go" data-act="task" data-d="${sd}" data-i="${i}">${ok?"もう一度":ti.btn}</button></div>`;}).join("")}</div></div>
   <div class="sheet"><div class="row between" style="margin-bottom:10px"><h3>30日カレンダー</h3><span class="small muted">日付は目安・赤丸＝模試</span></div><div class="cal">${PLAN.map((x,i)=>{const n=i+1,pr=dayProgress(n);const cls=[pr.n===pr.of?"full":pr.n?"part":"",n===d&&!allDone()?"today":"",n===sd?"sel":"",x.k.some(k=>k[0]==="mock")?"mock":""].join(" ");return `<button class="${cls}" data-act="selday" data-d="${n}" aria-label="Day ${n} ${x.t}">${n}<small>${jdate(addDays(S.start,i))}</small></button>`;}).join("")}</div></div>
@@ -1222,6 +1274,16 @@ function vStats(){
   const ms=S.mocks;const last3=ms.slice(-3);const avg=last3.length?Math.round(last3.reduce((s,m)=>s+m.total,0)/last3.length):null;
   const seen=Object.keys(S.qs).length;const mastered=Object.values(S.qs).filter(r=>r.b>=3).length;
   let h=`<div class="stack" style="gap:14px"><div><div class="eyebrow">記録</div><h1>合格への距離</h1></div>
+  <div class="sheet stack"><div class="row between"><div><div class="eyebrow">勉強時間（累計）</div><div class="tbig">${hm(totalSec())}</div></div><div style="text-align:right"><div class="eyebrow">今日</div><div class="num" style="font-size:18px;font-weight:600">${hm(todaySec())}</div></div></div>
+  ${weekChart()}<div class="legend"><span><i style="background:var(--accent)"></i>アプリ</span><span><i style="background:var(--debit)"></i>タイマー・手入力</span><span>単位：分</span></div>
+  <div class="row">${S.timer?`<button class="btn timer" data-act="tstop">停止して記録</button><span class="num" data-run>${clock(runSec())}</span>`:`<button class="btn timer" data-act="tstart">▶ タイマーを始める</button>`}</div></div>
+  <div class="sheet stack"><h3>勉強時間を手で追加</h3><p class="small muted">タイマーを付け忘れたときや、紙のテキストで勉強した分を追加できます。</p>
+  <label class="fld">日付<input type="date" id="mt-date" value="${today()}" max="${today()}"></label>
+  <div class="mins">${[15,30,45,60,90,120].map(m=>`<button class="opt" data-act="mtpick" data-m="${m}">${m}分</button>`).join("")}</div>
+  <label class="fld">時間（分）<input type="number" id="mt-min" inputmode="numeric" min="1" max="720" placeholder="例：40"></label>
+  <label class="fld">メモ（任意）<input type="text" id="mt-memo" maxlength="40" placeholder="例：テキスト第5章"></label>
+  <button class="btn" data-act="mtadd">追加する</button><p class="small muted" id="mt-msg"></p></div>
+  ${S.sess.length?`<div class="sheet"><h3>タイマー・手入力の履歴</h3>${S.sess.slice(0,15).map((e,i)=>`<div class="task"><div class="tt"><b>${hm(e.sec)}</b><span>${jdate(e.d)}・${e.src}${e.memo?"・"+esc(e.memo):""}</span></div><button class="ghost small" data-act="delsess" data-i="${i}">削除</button></div>`).join("")}</div>`:""}
   <div class="sheet stack"><div class="row between"><div><div class="eyebrow">合格予測（直近3回の模試平均）</div><div class="score" style="font-size:44px">${avg??"—"}<small> 点</small></div></div>${avg!=null?`<span class="chip ${avg>=70?"ok":"ng"}">${avg>=80?"安全圏":avg>=70?"合格圏":"あと"+(70-avg)+"点"}</span>`:""}</div>
   ${ms.length?trend(ms):`<p class="small muted">模試を受けると予測が表示されます。</p>`}</div>
   <div class="stats3"><div class="stat"><b>${seen}<span style="font-size:12px">/${QS.length}</span></b><span>挑戦した仕訳</span></div><div class="stat"><b>${mastered}</b><span>定着した仕訳</span></div><div class="stat"><b>${Object.values(S.log).reduce((a,b)=>a+b,0)}</b><span>総解答数</span></div></div>
@@ -1232,7 +1294,7 @@ function vStats(){
 }
 function vSettings(){
   return `<div class="stack" style="gap:14px"><button class="ghost small" data-act="tab" data-tab="home" style="align-self:flex-start">← 戻る</button><h1>設定</h1>
-  <div class="sheet stack"><label class="fld">学習開始日（Day 1）<input type="date" id="set-start" value="${S.start}"></label><label class="fld">試験日<input type="date" id="set-exam" value="${S.exam}"></label><button class="btn" data-act="saveset">保存</button><p class="small muted">ネット試験は全国のテストセンターでほぼ毎日受けられます。Day 30の翌日ごろに予約するのがおすすめです。</p></div>
+  <div class="sheet stack"><label class="fld">学習開始日（Day 1）<input type="date" id="set-start" value="${S.start}"></label><label class="fld">1日の目標勉強時間（分）<input type="number" id="set-goal" inputmode="numeric" min="10" max="600" value="${S.goal||90}"></label><label class="fld">試験日<input type="date" id="set-exam" value="${S.exam}"></label><button class="btn" data-act="saveset">保存</button><p class="small muted">ネット試験は全国のテストセンターでほぼ毎日受けられます。Day 30の翌日ごろに予約するのがおすすめです。</p></div>
   <div class="sheet stack"><h3>バックアップ</h3><p class="small">学習記録はこの端末のブラウザに保存されます。機種変更やブラウザのデータ削除に備えて、ときどきバックアップしてください。</p><div class="row"><button class="btn sub" data-act="export">バックアップを保存</button><button class="btn line" data-act="copyb">コードをコピー</button></div><textarea id="bk" rows="3" style="width:100%;font:12px var(--num);background:var(--paper);color:var(--ink);border:1.5px solid var(--rule);border-radius:9px;padding:8px" placeholder="復元するときはここにバックアップのコードを貼り付け"></textarea><button class="btn line" data-act="importb">貼り付けたコードから復元</button><label class="btn line" style="cursor:pointer">バックアップファイルから復元<input type="file" id="bkfile" accept="application/json,.json" hidden></label><p class="small muted" id="bkmsg"></p></div>
 <div class="sheet stack"><h3>リセット</h3>${CONFIRM?`<div class="confirm"><b>すべての学習記録を消しますか？</b><p class="small">元に戻せません。</p><div class="row"><button class="btn danger" data-act="reset">消去する</button><button class="btn line" data-act="mcancel">やめる</button></div></div>`:`<button class="btn line" data-act="askreset">学習記録をリセット</button>`}</div></div>`;
 }
@@ -1284,10 +1346,15 @@ document.addEventListener("click",e=>{
     case "mcancel":CONFIRM=false;render();break;
     case "mgrade":gradeMock();break;
     case "settings":TAB="home";CONFIRM=false;go("settings");break;
-    case "saveset":{const s=$("#set-start").value,x=$("#set-exam").value;if(s)S.start=s;if(x)S.exam=x;save();go("home");break;}
+    case "saveset":{const s=$("#set-start").value,x=$("#set-exam").value;if(s)S.start=s;if(x)S.exam=x;const gl=+$("#set-goal").value;if(gl>=10&&gl<=600)S.goal=gl;save();go("home");break;}
     case "export":{try{const blob=new Blob([JSON.stringify(S)],{type:"application/json"});const u=URL.createObjectURL(blob);const x=document.createElement("a");x.href=u;x.download="boki3-backup-"+today()+".json";document.body.appendChild(x);x.click();x.remove();setTimeout(()=>URL.revokeObjectURL(u),2000);}catch(err){}break;}
     case "copyb":{const t=JSON.stringify(S);const box=$("#bk");box.value=t;const m=$("#bkmsg");(navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(()=>{m.textContent="コピーしました。メモアプリなどに貼って保管してください。";},()=>{box.select();m.textContent="上の欄のコードを選択してコピーしてください。";});break;}
     case "importb":{const m=$("#bkmsg");try{const r=JSON.parse($("#bk").value.trim());if(!r||!r.qs||!r.start)throw 0;S=Object.assign(fresh(),r);save();m.textContent="復元しました。";go("home");}catch(err){m.textContent="コードを読み取れませんでした。全体をコピーできているか確認してください。";}break;}
+    case "tstart":startTimer2();break;
+    case "tstop":stopTimer2();break;
+    case "mtpick":{$("#mt-min").value=el.dataset.m;document.querySelectorAll('[data-act="mtpick"]').forEach(o=>o.classList.toggle("on",o===el));break;}
+    case "mtadd":{const d=$("#mt-date").value||today(),m=+$("#mt-min").value,msg=$("#mt-msg");if(!(m>0&&m<=720)){msg.textContent="1〜720分の範囲で入力してください。";break;}if(d>today()){msg.textContent="未来の日付には追加できません。";break;}addManual(d,m,$("#mt-memo").value.trim());render();break;}
+    case "delsess":delSess(+el.dataset.i);render();break;
     case "askreset":CONFIRM=true;render();break;
     case "reset":S=fresh();save();CONFIRM=false;SELDAY=null;go("home");break;
   }
