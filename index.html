@@ -818,7 +818,7 @@ function setSync(){}
 function syncLabel(){return "この端末に保存";}
 /* ============ SRS ============ */
 const IV=[0,1,2,4,7,15];
-function recordQ(id,ok){const r=S.qs[id]||{b:0,c:0,w:0,due:today()};if(ok){r.c++;r.b=Math.min(5,r.b+1);}else{r.w++;r.b=0;}r.due=addDays(today(),IV[r.b]||1);if(!ok)r.due=addDays(today(),1);r.last=today();S.qs[id]=r;logOne();}
+function recordQ(id,ok){const r=S.qs[id]||{b:0,c:0,w:0,due:today()};if(ok){r.c++;r.b=Math.min(5,r.b+1);}else{r.w++;r.b=0;}r.due=addDays(today(),IV[r.b]||1);if(!ok)r.due=addDays(today(),1);r.at=Date.now();r.last=today();S.qs[id]=r;logOne();}
 function logOne(){const t=today();S.log[t]=(S.log[t]||0)+1;}
 function dueList(){const t=today();return QS.filter(q=>S.qs[q.id]&&S.qs[q.id].due<=t&&S.qs[q.id].b<5);}
 function weakList(){return QS.filter(q=>S.qs[q.id]&&S.qs[q.id].w>0).sort((a,b)=>{const ra=S.qs[a.id],rb=S.qs[b.id];return (ra.c/(ra.c+ra.w))-(rb.c/(rb.c+rb.w))||rb.w-ra.w;});}
@@ -1134,13 +1134,14 @@ function curDay(){for(let d=1;d<=30;d++){const pr=dayProgress(d);if(pr.n<pr.of)r
 function allDone(){return PLAN.every((_,i)=>{const pr=dayProgress(i+1);return pr.n===pr.of;});}
 function doneToday(){return Object.values(S.doneAt||{}).filter(x=>x===today()).length;}
 function paceChip(){const diff=(allDone()?31:curDay())-calDay();if(diff>0)return `<span class="chip ok">予定より${diff}日先行</span>`;if(diff<0)return `<span class="chip ng">予定より${-diff}日遅れ</span>`;return `<span class="chip plain">予定どおり</span>`;}
+function prog(k){const d=curDay();if(!PLAN[d-1].k.includes(k))return "";const [n,need]=taskCount(k,d);return n>0&&n<need?`（いま${n}/${need}問）`:"";}
 function taskInfo(k){
   switch(k[0]){
     case "lesson":{const l=L.find(x=>x.id===k[1]);return {t:"講義："+l.title,s:l.sub,btn:"読む"};}
-    case "class":return {t:"5要素クイズ",s:k[1]+"問・勘定科目のグループ分け",btn:"解く"};
-    case "drill":return {t:"仕訳ドリル："+(k[1].length>3?"総合":k[1].map(t=>TOPICS[t]).join("・")),s:k[2]+"問",btn:"解く"};
+    case "class":return {t:"5要素クイズ",s:k[1]+"問・勘定科目のグループ分け"+prog(k),btn:"解く"};
+    case "drill":return {t:"仕訳ドリル："+(k[1].length>3?"総合":k[1].map(t=>TOPICS[t]).join("・")),s:k[2]+"問"+prog(k),btn:"解く"};
     case "review":{const n=dueList().length;return {t:"今日の復習",s:n?n+"問が復習のタイミング":"復習待ちの問題はありません",btn:"復習"};}
-    case "weak":return {t:"弱点問題",s:"間違えた問題から"+k[1]+"問",btn:"解く"};
+    case "weak":return {t:"弱点問題",s:"間違えた問題から"+k[1]+"問"+prog(k),btn:"解く"};
     case "q2":return {t:"第2問ドリル",s:"補助簿・帳簿記入 1セット（20点）",btn:"解く"};
     case "rand10":return {t:"肩ならし 仕訳10問",s:"全範囲から・解けるものを確認するだけ",btn:"解く"};
     case "q3":return {t:"第3問ドリル",s:"財務諸表 1セット（35点）・ヒント付き",btn:"解く"};
@@ -1148,7 +1149,35 @@ function taskInfo(k){
   }
 }
 function dayProgress(d){const p=PLAN[d-1];const done=S.days[d]||{};const n=p.k.filter((k,i)=>done[i]).length;return {n,of:p.k.length};}
+/* ---- 進捗の自動判定（どこから解いても、その日のメニューに数える） ---- */
+function dayStart(ds){const [y,m,d]=ds.split("-").map(Number);return new Date(y,m-1,d).getTime();}
+function sinceTs(d){if(d<=1)return 0;if(S.doneTs&&S.doneTs[d-1])return S.doneTs[d-1];if(S.doneAt&&S.doneAt[d-1])return dayStart(S.doneAt[d-1]);return 0;}
+function qAt(r){return r.at||(r.last?dayStart(r.last)+1:0);}
+function taskCount(k,d){
+  const t0=sinceTs(d);
+  switch(k[0]){
+    case "drill":{const pool=QS.filter(q=>k[1].includes(q.topic));const need=Math.min(k[2],pool.length);const n=pool.filter(q=>{const r=S.qs[q.id];return r&&qAt(r)>=t0;}).length;return [n,need];}
+    case "weak":{const any=weakList().length>0;const n=QS.filter(q=>{const r=S.qs[q.id];return r&&qAt(r)>=t0&&(!any||r.w>0);}).length;return [n,k[1]];}
+    case "class":return [(S.clsAt||[]).filter(x=>x>=t0).length,k[1]];
+    case "q2":return [(S.q2at||[]).filter(x=>x>=t0).length,1];
+    case "q3":return [(S.q3at||[]).filter(x=>x>=t0).length,1];
+    case "mock":return [S.mocks.filter(m=>(m.ts||dayStart(m.date)+1)>=t0).length,1];
+    case "lesson":return [S.read[k[1]]?1:0,1];
+    case "review":return [dueList().length?0:1,1];
+  }
+  return [0,1];
+}
+function autoComplete(){
+  let changed=false;
+  for(let guard=0;guard<30;guard++){
+    const d=curDay();const p=PLAN[d-1];const done=S.days[d]||{};let any=false;
+    p.k.forEach((k,i)=>{if(done[i])return;const [n,need]=taskCount(k,d);if(n>=need){markTask({d,i});any=true;}});
+    if(!any)break;changed=true;if(curDay()===d)break;
+  }
+  if(changed)save();
+}
 function render(){
+  autoComplete();
   document.body.classList.toggle("mocking",!!MOCK&&VIEW.name==="mock-run");
   document.querySelectorAll("#tabs button").forEach(b=>b.classList.toggle("on",b.dataset.tab===TAB));
   $("#tabs").hidden=VIEW.name==="session"||VIEW.name==="mock-run";
@@ -1297,7 +1326,7 @@ function gradeMock(){
   const s1=q1.filter(x=>x.ok).length*3;const g2=gradeQ2(m.q2,p+"q2");const g3=gradeQ3(m.q3,p+"q3");
   const total=Math.round(s1+g2.total+g3.total);
   const rec={date:today(),s1,s2:g2.total,s3:g3.total,total,secs:Math.round((Math.min(Date.now(),m.end)-m.start)/1000)};
-  S.mocks.push(rec);if(m.task)markTask(m.task);save();
+  rec.ts=Date.now();S.mocks.push(rec);if(m.task)markTask(m.task);save();
   RESULT={m,q1,g2,g3,rec};MOCK=null;SELDAY=null;CONFIRM=false;clearMock();TAB="mock";go("result");
 }
 function vResult(){
@@ -1342,7 +1371,7 @@ function vSettings(){
 }
 
 /* ============ 操作 ============ */
-function markTask(t){const d=t.d,i=t.i;S.days[d]=S.days[d]||{};S.days[d][i]=true;S.doneAt=S.doneAt||{};if(typeof d!=="number")return;const pr=dayProgress(d);if(pr.n===pr.of&&!S.doneAt[d])S.doneAt[d]=today();}
+function markTask(t){const d=t.d,i=t.i;S.days[d]=S.days[d]||{};S.days[d][i]=true;S.doneAt=S.doneAt||{};if(typeof d!=="number")return;const pr=dayProgress(d);if(pr.n===pr.of&&!S.doneAt[d]){(S.doneTs=S.doneTs||{})[d]=Date.now();}if(pr.n===pr.of&&!S.doneAt[d])S.doneAt[d]=today();}
 function runTask(d,i){runK(PLAN[d-1].k[i],{d,i});}
 function runK(k,task){
   switch(k[0]){
@@ -1373,11 +1402,11 @@ document.addEventListener("click",e=>{
     case "addrow":{const st=FORMS[el.dataset.key];if(st&&st.rows<5){st.rows++;render();}break;}
     case "answer":{const s=SESSION,it=s.items[s.i];
       if(it.type==="j"){it.ok=gradeJ(it.key,it.q);recordQ(it.q.id,it.ok);if(it.ok)s.ok++;}
-      else if(it.type==="q2"){it.g=gradeQ2(it.o,it.key);S.q2.push(it.g.total);logOne();}
-      else if(it.type==="q3"){it.g=gradeQ3(it.o,it.key);S.q3.push(it.g.total);logOne();}
+      else if(it.type==="q2"){it.g=gradeQ2(it.o,it.key);S.q2.push(it.g.total);(S.q2at=S.q2at||[]).push(Date.now());logOne();}
+      else if(it.type==="q3"){it.g=gradeQ3(it.o,it.key);S.q3.push(it.g.total);(S.q3at=S.q3at||[]).push(Date.now());logOne();}
       s.graded=true;save();render();break;}
     case "giveup":{const s=SESSION,it=s.items[s.i];it.ok=false;recordQ(it.q.id,false);s.graded=true;save();render();break;}
-    case "cls":{const s=SESSION,it=s.items[s.i];it.pick=el.dataset.c;it.ok=CAT[it.a]===it.pick;if(it.ok){s.ok++;S.cls.c++;}else S.cls.w++;logOne();s.graded=true;save();render();break;}
+    case "cls":{const s=SESSION,it=s.items[s.i];it.pick=el.dataset.c;it.ok=CAT[it.a]===it.pick;if(it.ok){s.ok++;S.cls.c++;}else S.cls.w++;S.clsAt=(S.clsAt||[]).concat(Date.now()).slice(-200);logOne();s.graded=true;save();render();break;}
     case "hint":{const it=SESSION.items[SESSION.i];const i=+el.dataset.i;it.hints[i]=!it.hints[i];render();break;}
     case "next":SESSION.i++;SESSION.graded=false;if(SESSION.i>=SESSION.items.length&&SESSION.task){markTask(SESSION.task);save();}render();window.scrollTo(0,0);break;
     case "quit":SESSION=null;go(TAB);break;
