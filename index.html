@@ -235,6 +235,7 @@ label.fld input{font:inherit;font-size:16px;color:var(--ink);background:var(--pa
 .legend{display:flex;gap:12px;font-size:12px;color:var(--muted);flex-wrap:wrap}
 .legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:4px;vertical-align:-1px}
 .mins{display:flex;gap:6px;flex-wrap:wrap}
+.okstamp{flex:none;width:76px;height:76px;border-radius:50%;border:4px solid var(--stamp);color:var(--stamp);display:grid;place-items:center;text-align:center;font-weight:900;font-size:17px;line-height:1.15;transform:rotate(-10deg)}
 </style>
 
 <style>
@@ -859,6 +860,44 @@ function weekChart(){
     const tot=Math.round(v.app+v.ext);if(tot>0)g+=`<text x="${x+bw/2}" y="${ye-4}" text-anchor="middle" font-size="10" fill="var(--ink)" font-family="IBM Plex Mono,monospace">${tot}</text>`;
     g+=`<text x="${x+bw/2}" y="${H-6}" text-anchor="middle" font-size="10" fill="${v.d===today()?"var(--ink)":"var(--muted)"}" font-weight="${v.d===today()?700:400}">${v.d===today()?"今日":jdate(v.d)}</text>`;});
   g+=`<line x1="${P}" x2="${W-P}" y1="${H-P}" y2="${H-P}" stroke="var(--rule)"/></svg>`;return g;}
+/* ---- 受験判定・本番モード ---- */
+function readiness(){
+  const ms=S.mocks,l3=ms.slice(-3);
+  const mockOk=l3.length===3&&l3.every(m=>m.total>=70);
+  const tps=Object.keys(TOPICS).map(t=>[t,topicAcc(t)]);const weakT=tps.filter(([t,a])=>a.acc==null||a.acc<0.8||a.seen<Math.min(5,a.total));
+  const s3=ms.slice(-3).map(m=>m.s3).concat(S.q3.slice(-3));const s3avg=s3.length?s3.reduce((a,b)=>a+b,0)/s3.length:null;
+  const items=[
+    {ok:allDone(),t:"30日プランを一周",s:allDone()?"完了":"あと"+PLAN.reduce((n,_,i)=>{const p=dayProgress(i+1);return n+(p.n<p.of?1:0);},0)+"日分",fix:null},
+    {ok:mockOk,t:"模試で3回続けて70点以上",s:l3.length?"直近 "+l3.map(m=>m.total).join("・")+"点":"まだ受けていません",fix:"mock"},
+    {ok:!weakT.length,t:"すべての単元で正答率80%以上",s:weakT.length?"足りない単元："+weakT.slice(0,3).map(([t])=>TOPICS[t]).join("・")+(weakT.length>3?" ほか":""):"達成",fix:weakT.length?"topic:"+weakT[0][0]:null},
+    {ok:s3avg!=null&&s3avg>=25,t:"第3問で平均25点以上（35点満点）",s:s3avg==null?"まだ解いていません":"直近の平均 "+Math.round(s3avg*10)/10+"点",fix:"q3"}];
+  return {items,n:items.filter(x=>x.ok).length,ready:items.every(x=>x.ok),mockStarted:ms.length>0,lastMock:ms[ms.length-1]};
+}
+function readyCard(){
+  const r=readiness();if(curDay()<18&&!r.mockStarted&&!allDone())return "";
+  const fixBtn=f=>{if(!f)return "";if(f==="mock")return `<button class="go" data-act="mockstart">模試</button>`;if(f==="q3")return `<button class="go" data-act="start" data-kind="q3">解く</button>`;const t=f.split(":")[1];return `<button class="go" data-act="start" data-kind="topic" data-t="${t}">解く</button>`;};
+  let head;
+  if(r.ready)head=`<div class="row" style="gap:14px;align-items:center"><div class="okstamp">受験<br>OK</div><div style="flex:1;min-width:0"><h2>受験して大丈夫です</h2><p class="small">${S.booked?"試験日まで、復習と模試で実力をキープしましょう。":"いちばん近い空いている日を予約しましょう。予約したら、試験日を入れてください。"}</p></div></div>${S.booked?"":`<button class="btn block" data-act="settings">予約した試験日を入れる</button>`}`;
+  else head=`<div><div class="eyebrow">受験判定</div><h2>あと${4-r.n}つで受験OK</h2>${!S.booked&&r.lastMock&&r.lastMock.total>=70?`<p class="small" style="margin-top:4px;padding:8px 10px;border-radius:9px;background:var(--accent-soft)">模試で70点を超えました。会場が埋まる前に、そろそろ予約を考えましょう。</p>`:""}</div>`;
+  return `<div class="sheet stack">${head}<div>${r.items.map(x=>`<div class="task${x.ok?" done":""}"><div class="box">${x.ok?"✓":""}</div><div class="tt"><b>${x.t}</b><span>${x.s}</span></div>${x.ok?"":fixBtn(x.fix)}</div>`).join("")}</div></div>`;
+}
+const PRE_TASKS=[["lesson","L19"],["review"],["weak",10]];
+const DAY_TASKS=[["rand10"]];
+const BRING=["受験票（予約確認メール）","顔写真付きの身分証明書","電卓（関数電卓は不可）","会場までの行き方と集合時刻","時計の代わりはPC画面の残り時間（スマホは使えない）"];
+function examCard(){
+  if(!S.booked)return "";const left=diffDays(today(),S.exam);
+  if(left<0||left>7){if(left<0&&!S.result)return `<div class="sheet stack"><div class="eyebrow">試験おつかれさまでした</div><h2>結果はどうでしたか？</h2><div class="row"><button class="btn" data-act="res" data-r="pass">合格した</button><button class="btn line" data-act="res" data-r="fail">不合格だった</button></div></div>`;
+    if(S.result==="pass")return `<div class="sheet result" style="min-height:130px"><div class="eyebrow">日商簿記3級</div><h2 style="margin-top:6px">合格おめでとうございます</h2><p class="small muted" style="margin-top:4px;max-width:60%">累計 ${hm(totalSec())} の勉強でした。</p><div class="hanko">合格</div></div>`;
+    if(S.result==="fail")return `<div class="sheet stack"><h2>次で取り返しましょう</h2><p class="small">ネット試験はすぐ受け直せます（受験日から数日は再受験できない決まりがあります）。模試の見直しと弱点問題で1〜2週間仕上げて、次の日を予約しましょう。</p><div class="row"><button class="btn" data-act="start" data-kind="weak">弱点問題</button><button class="btn line" data-act="settings">次の試験日を入れる</button></div></div>`;
+    return "";}
+  const ck=S.check&&S.check[S.exam]||{};
+  const tasks=(list,key)=>list.map((k,i)=>{const ti=taskInfo(k);const ok=!!(S.days[key]||{})[i];return `<div class="task${ok?" done":""}"><div class="box">${ok?"✓":""}</div><div class="tt"><b>${ti.t}</b><span>${ti.s}</span></div><button class="go" data-act="xtask" data-key="${key}" data-set="${list===PRE_TASKS?"pre":"day"}" data-i="${i}">${ok?"もう一度":ti.btn}</button></div>`;}).join("");
+  const bring=`<h3 style="margin-top:6px">持ち物チェック</h3>${BRING.map((b,i)=>`<button class="task${ck[i]?" done":""}" style="width:100%;text-align:left" data-act="bring" data-i="${i}"><span class="box">${ck[i]?"✓":""}</span><span class="tt"><b>${b}</b></span></button>`).join("")}`;
+  if(left===0)return `<div class="sheet stack" style="border:2px solid var(--stamp)"><div class="eyebrow" style="color:var(--stamp)">今日は本番</div><h2>落ち着いていけば大丈夫</h2><p class="small">時間配分：第1問15分 → 第3問25分 → 第2問12分 → 見直し8分。第3問は確実な欄から埋めて部分点を取りましょう。</p><div>${tasks(DAY_TASKS,"day-"+S.exam)}</div>${bring}</div>`;
+  if(left===1)return `<div class="sheet stack" style="border:2px solid var(--accent)"><div class="eyebrow">明日は本番（${jdate(S.exam)}）</div><h2>前日のメニュー</h2><p class="small">新しいことには手を出さず、確認だけ。早めに寝ましょう。</p><div>${tasks(PRE_TASKS,"pre-"+S.exam)}</div>${bring}</div>`;
+  const remain=PLAN.reduce((n,_,i)=>{const p=dayProgress(i+1);return n+(p.n<p.of?1:0);},0);
+  return `<div class="sheet stack"><div class="eyebrow">本番まであと${left}日（${jdate(S.exam)}）</div>${remain>left-1?`<p class="small">プランが残り${remain}日分あります。前日までに終えるには1日${Math.ceil(remain/Math.max(1,left-1))}日分のペースです。終わらなくても、模試と弱点問題を優先すれば大丈夫です。</p>`:`<p class="small">プランは前日までに終わるペースです。空いた日は模試と「弱点問題」で仕上げましょう。</p>`}<div class="row"><button class="btn sub" data-act="mockstart">模試を受ける</button><button class="btn line" data-act="start" data-kind="weak">弱点問題</button></div></div>`;
+}
 function timeCard(){
   const sec=todaySec(),goal=(S.goal||90)*60;const pc=Math.min(1,sec/goal);
   return `<div class="sheet tcard"><div class="row between"><div><div class="eyebrow">今日の勉強時間</div><div class="tbig"><span id="today-time">${hm(sec)}</span><small> / 目標${hm(goal)}</small></div></div>${S.timer?`<button class="btn timer" data-act="tstop">停止 <span class="num" data-run>${clock(runSec())}</span></button>`:`<button class="btn timer" data-act="tstart">▶ タイマー</button>`}</div>
@@ -1103,6 +1142,7 @@ function taskInfo(k){
     case "review":{const n=dueList().length;return {t:"今日の復習",s:n?n+"問が復習のタイミング":"復習待ちの問題はありません",btn:"復習"};}
     case "weak":return {t:"弱点問題",s:"間違えた問題から"+k[1]+"問",btn:"解く"};
     case "q2":return {t:"第2問ドリル",s:"補助簿・帳簿記入 1セット（20点）",btn:"解く"};
+    case "rand10":return {t:"肩ならし 仕訳10問",s:"全範囲から・解けるものを確認するだけ",btn:"解く"};
     case "q3":return {t:"第3問ドリル",s:"財務諸表 1セット（35点）・ヒント付き",btn:"解く"};
     case "mock":return {t:"模擬試験（60分）",s:"第1〜3問・100点満点",btn:"開始"};
   }
@@ -1125,11 +1165,13 @@ function vHome(){
   const tot=PLAN.reduce((s,_,i)=>s+dayProgress(i+1).n,0),of=PLAN.reduce((s,x)=>s+x.k.length,0);
   let h=`<div class="stack" style="gap:16px">
   <div class="topbar"><div><div class="eyebrow">合格まで30日プラン</div><div class="daybig">${allDone()?"完走":"Day "+d}<small>/30</small></div></div>
-  <div style="text-align:right"><div class="eyebrow">試験日 ${jdate(S.exam)}</div><div class="num" style="font-size:20px;font-weight:600">${left>=0?"あと"+left+"日":"終了"}</div><div class="sync" id="sync">${syncLabel()}</div></div></div>
+  <div style="text-align:right"><div class="eyebrow">${S.booked?"予約済み":"目標"} ${jdate(S.exam)}</div><div class="num" style="font-size:20px;font-weight:600">${left>=0?"あと"+left+"日":"終了"}</div><div class="sync" id="sync">${syncLabel()}</div></div></div>
   <div class="row">${paceChip()}${doneToday()?`<span class="chip">今日 ${doneToday()}日分クリア</span>`:""}</div>
   <div class="meter" title="全体の進み具合"><i style="width:${Math.round(tot/of*100)}%"></i></div>
   <div class="stats3"><div class="stat"><b>${acc==null?"—":Math.round(acc*100)+"%"}</b><span>仕訳の正答率</span></div><div class="stat"><b>${dueList().length}</b><span>復習待ち</span></div><div class="stat"><b>${last?last.total:"—"}</b><span>直近の模試</span></div></div>
+  ${examCard()}
   ${timeCard()}
+  ${readyCard()}
   <div class="sheet"><div class="row between"><div><div class="eyebrow">${sd===d?"次にやるメニュー":"Day "+sd+" のメニュー"}</div><h2>Day ${sd}　${p.t}</h2></div>${sd!==d?`<button class="ghost small" data-act="selday" data-d="${d}">次のメニューへ</button>`:""}</div>
   ${sd===d&&d>1&&S.doneAt&&S.doneAt[d-1]===today()&&dayProgress(d).n===0?`<p class="small" style="margin-top:6px;padding:8px 10px;border-radius:9px;background:var(--accent-soft)">Day ${d-1} を完了しました。余裕があればこのまま Day ${d} へ進めます。今日はここまででも大丈夫です。</p>`:""}<div style="margin-top:6px">${p.k.map((k,i)=>{const ti=taskInfo(k);const ok=!!done[i];return `<div class="task${ok?" done":""}"><div class="box">${ok?"✓":""}</div><div class="tt"><b>${ti.t}</b><span>${ti.s}</span></div><button class="go" data-act="task" data-d="${sd}" data-i="${i}">${ok?"もう一度":ti.btn}</button></div>`;}).join("")}</div></div>
   <div class="sheet"><div class="row between" style="margin-bottom:10px"><h3>30日カレンダー</h3><span class="small muted">日付は目安・赤丸＝模試</span></div><div class="cal">${PLAN.map((x,i)=>{const n=i+1,pr=dayProgress(n);const cls=[pr.n===pr.of?"full":pr.n?"part":"",n===d&&!allDone()?"today":"",n===sd?"sel":"",x.k.some(k=>k[0]==="mock")?"mock":""].join(" ");return `<button class="${cls}" data-act="selday" data-d="${n}" aria-label="Day ${n} ${x.t}">${n}<small>${jdate(addDays(S.start,i))}</small></button>`;}).join("")}</div></div>
@@ -1294,19 +1336,20 @@ function vStats(){
 }
 function vSettings(){
   return `<div class="stack" style="gap:14px"><button class="ghost small" data-act="tab" data-tab="home" style="align-self:flex-start">← 戻る</button><h1>設定</h1>
-  <div class="sheet stack"><label class="fld">学習開始日（Day 1）<input type="date" id="set-start" value="${S.start}"></label><label class="fld">1日の目標勉強時間（分）<input type="number" id="set-goal" inputmode="numeric" min="10" max="600" value="${S.goal||90}"></label><label class="fld">試験日<input type="date" id="set-exam" value="${S.exam}"></label><button class="btn" data-act="saveset">保存</button><p class="small muted">ネット試験は全国のテストセンターでほぼ毎日受けられます。Day 30の翌日ごろに予約するのがおすすめです。</p></div>
+  <div class="sheet stack"><label class="fld">学習開始日（Day 1）<input type="date" id="set-start" value="${S.start}"></label><label class="fld">1日の目標勉強時間（分）<input type="number" id="set-goal" inputmode="numeric" min="10" max="600" value="${S.goal||90}"></label><label class="fld">試験日<input type="date" id="set-exam" value="${S.exam}"></label><label class="row" style="font-size:15px;gap:10px"><input type="checkbox" id="set-booked" ${S.booked?"checked":""} style="width:22px;height:22px;accent-color:var(--accent)">この日で予約済み（前日・当日のメニューが出ます）</label><button class="btn" data-act="saveset">保存</button><p class="small muted">ネット試験は全国のテストセンターでほぼ毎日受けられます。Day 30の翌日ごろに予約するのがおすすめです。</p></div>
   <div class="sheet stack"><h3>バックアップ</h3><p class="small">学習記録はこの端末のブラウザに保存されます。機種変更やブラウザのデータ削除に備えて、ときどきバックアップしてください。</p><div class="row"><button class="btn sub" data-act="export">バックアップを保存</button><button class="btn line" data-act="copyb">コードをコピー</button></div><textarea id="bk" rows="3" style="width:100%;font:12px var(--num);background:var(--paper);color:var(--ink);border:1.5px solid var(--rule);border-radius:9px;padding:8px" placeholder="復元するときはここにバックアップのコードを貼り付け"></textarea><button class="btn line" data-act="importb">貼り付けたコードから復元</button><label class="btn line" style="cursor:pointer">バックアップファイルから復元<input type="file" id="bkfile" accept="application/json,.json" hidden></label><p class="small muted" id="bkmsg"></p></div>
 <div class="sheet stack"><h3>リセット</h3>${CONFIRM?`<div class="confirm"><b>すべての学習記録を消しますか？</b><p class="small">元に戻せません。</p><div class="row"><button class="btn danger" data-act="reset">消去する</button><button class="btn line" data-act="mcancel">やめる</button></div></div>`:`<button class="btn line" data-act="askreset">学習記録をリセット</button>`}</div></div>`;
 }
 
 /* ============ 操作 ============ */
-function markTask(t){const d=t.d,i=t.i;S.days[d]=S.days[d]||{};S.days[d][i]=true;S.doneAt=S.doneAt||{};const pr=dayProgress(d);if(pr.n===pr.of&&!S.doneAt[d])S.doneAt[d]=today();}
-function runTask(d,i){
-  const k=PLAN[d-1].k[i];const task={d,i};
+function markTask(t){const d=t.d,i=t.i;S.days[d]=S.days[d]||{};S.days[d][i]=true;S.doneAt=S.doneAt||{};if(typeof d!=="number")return;const pr=dayProgress(d);if(pr.n===pr.of&&!S.doneAt[d])S.doneAt[d]=today();}
+function runTask(d,i){runK(PLAN[d-1].k[i],{d,i});}
+function runK(k,task){
   switch(k[0]){
     case "lesson":go("lesson",{id:k[1],task});break;
     case "class":startSession("class",{n:k[1],task});break;
     case "drill":startSession("drill",{topics:k[1],n:k[2],task});break;
+    case "rand10":startSession("drill",{topics:[...ALLT,"t11"],n:10,task});break;
     case "review":if(!dueList().length){markTask(task);save();render();}else startSession("review",{task});break;
     case "weak":if(!weakList().length){startSession("drill",{topics:ALLT,n:k[1],task});}else startSession("weak",{n:k[1],task});break;
     case "q2":startSession("q2",{task});break;
@@ -1346,7 +1389,7 @@ document.addEventListener("click",e=>{
     case "mcancel":CONFIRM=false;render();break;
     case "mgrade":gradeMock();break;
     case "settings":TAB="home";CONFIRM=false;go("settings");break;
-    case "saveset":{const s=$("#set-start").value,x=$("#set-exam").value;if(s)S.start=s;if(x)S.exam=x;const gl=+$("#set-goal").value;if(gl>=10&&gl<=600)S.goal=gl;save();go("home");break;}
+    case "saveset":{const s=$("#set-start").value,x=$("#set-exam").value;if(s)S.start=s;if(x&&x!==S.exam){S.exam=x;S.result=null;}S.booked=$("#set-booked").checked;const gl=+$("#set-goal").value;if(gl>=10&&gl<=600)S.goal=gl;save();go("home");break;}
     case "export":{try{const blob=new Blob([JSON.stringify(S)],{type:"application/json"});const u=URL.createObjectURL(blob);const x=document.createElement("a");x.href=u;x.download="boki3-backup-"+today()+".json";document.body.appendChild(x);x.click();x.remove();setTimeout(()=>URL.revokeObjectURL(u),2000);}catch(err){}break;}
     case "copyb":{const t=JSON.stringify(S);const box=$("#bk");box.value=t;const m=$("#bkmsg");(navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(()=>{m.textContent="コピーしました。メモアプリなどに貼って保管してください。";},()=>{box.select();m.textContent="上の欄のコードを選択してコピーしてください。";});break;}
     case "importb":{const m=$("#bkmsg");try{const r=JSON.parse($("#bk").value.trim());if(!r||!r.qs||!r.start)throw 0;S=Object.assign(fresh(),r);save();m.textContent="復元しました。";go("home");}catch(err){m.textContent="コードを読み取れませんでした。全体をコピーできているか確認してください。";}break;}
@@ -1355,6 +1398,9 @@ document.addEventListener("click",e=>{
     case "mtpick":{$("#mt-min").value=el.dataset.m;document.querySelectorAll('[data-act="mtpick"]').forEach(o=>o.classList.toggle("on",o===el));break;}
     case "mtadd":{const d=$("#mt-date").value||today(),m=+$("#mt-min").value,msg=$("#mt-msg");if(!(m>0&&m<=720)){msg.textContent="1〜720分の範囲で入力してください。";break;}if(d>today()){msg.textContent="未来の日付には追加できません。";break;}addManual(d,m,$("#mt-memo").value.trim());render();break;}
     case "delsess":delSess(+el.dataset.i);render();break;
+    case "xtask":{const list=el.dataset.set==="pre"?PRE_TASKS:DAY_TASKS;runK(list[+el.dataset.i],{d:el.dataset.key,i:+el.dataset.i});break;}
+    case "bring":{S.check=S.check||{};const c=S.check[S.exam]=S.check[S.exam]||{};const i=el.dataset.i;c[i]=!c[i];save();render();break;}
+    case "res":S.result=el.dataset.r;save();render();break;
     case "askreset":CONFIRM=true;render();break;
     case "reset":S=fresh();save();CONFIRM=false;SELDAY=null;go("home");break;
   }
